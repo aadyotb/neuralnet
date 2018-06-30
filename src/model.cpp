@@ -9,6 +9,7 @@
 #include <iostream>
 #include <vector>
 #include <algorithm>
+#include <memory>
 
 #include <cuda_runtime.h>
 #include <cublas_v2.h>
@@ -25,21 +26,19 @@
  * and width to 1, and let the number of channels c represent the dimensionality
  * of the input vectors.
  */
-Model::Model(int n, int c, int h, int w) {
-    this->has_loss = false;
-    this->batch_size = n;
-    this->input_size = c * h * w;
+Model::Model(int n, int c, int h, int w) :
+    has_loss(false),
+    batch_size(n),
+    input_size(c * h * w),
+    layers()
+{
     CUBLAS_CALL( cublasCreate(&cublasHandle) );
     CUDNN_CALL( cudnnCreate(&cudnnHandle) );
-    this->layers = new std::vector<Layer *>;
-    this->layers->push_back(new Input(n, c, h, w, cublasHandle, cudnnHandle));
+    this->layers.emplace_back(new Input(n, c, h, w, cublasHandle, cudnnHandle));
 }
 
-Model::~Model() {
-    std::vector<Layer *>::iterator it;
-    for (it = this->layers->begin(); it != this->layers->end(); ++it)
-        delete *it;
-    delete this->layers;
+Model::~Model()
+{
     if (workspace)
         CUDA_CALL( cudaFree(workspace) );
     CUBLAS_CALL( cublasDestroy(cublasHandle) );
@@ -60,13 +59,13 @@ void Model::add(std::string layer, std::vector<int> shape)
 {
     assert(!this->has_loss && "Cannot add any layers after a loss function.");
 
-    Layer *last = layers->back();
+    auto last = layers.back();
     std::transform(layer.begin(), layer.end(), layer.begin(), ::tolower);
 
     /* ReLU activation */
     if (layer == "relu")
     {
-        layers->push_back(
+        layers.emplace_back(
             new Activation(last, CUDNN_ACTIVATION_RELU, 0.0,
                 cublasHandle, cudnnHandle));
     }
@@ -74,7 +73,7 @@ void Model::add(std::string layer, std::vector<int> shape)
     /* tanh activation */
     else if (layer == "tanh")
     {
-        layers->push_back(
+        layers.emplace_back(
             new Activation(last, CUDNN_ACTIVATION_TANH, 0.0,
                 cublasHandle, cudnnHandle));
     }
@@ -82,7 +81,7 @@ void Model::add(std::string layer, std::vector<int> shape)
     /* Loss layers must also update that the model has a loss function */
     else if (layer == "softmax crossentropy" || layer == "softmax cross-entropy")
     {
-        layers->push_back(new SoftmaxCrossEntropy(last, cublasHandle, cudnnHandle));
+        layers.emplace_back(new SoftmaxCrossEntropy(last, cublasHandle, cudnnHandle));
         this->has_loss = true;
     }
 
@@ -91,7 +90,7 @@ void Model::add(std::string layer, std::vector<int> shape)
     {
         assert(!shape.empty() && shape[0] > 0 &&
             "Must specify positive output shape for dense layer.");
-        layers->push_back(new Dense(last, shape[0], cublasHandle, cudnnHandle));
+        layers.emplace_back(new Dense(last, shape[0], cublasHandle, cudnnHandle));
     }
 
     /* Convolutional layer */
@@ -103,7 +102,7 @@ void Model::add(std::string layer, std::vector<int> shape)
             "Must specify positive kernel dimension for conv layer.");
         assert(shape[2] > 0 &&
             "Must specify positive stride for conv layer.");
-        layers->push_back(
+        layers.emplace_back(
             new Conv2D(last, shape[0], shape[1], shape[2],
                 cublasHandle, cudnnHandle));
     }
@@ -113,7 +112,7 @@ void Model::add(std::string layer, std::vector<int> shape)
     {
         assert(!shape.empty() && shape[0] > 0 &&
             "Must specify positive pooling dimension.");
-        layers->push_back(
+        layers.emplace_back(
             new Pool2D(last, shape[0], CUDNN_POOLING_MAX,
                 cublasHandle, cudnnHandle) );
     }
@@ -123,7 +122,7 @@ void Model::add(std::string layer, std::vector<int> shape)
     {
         assert(!shape.empty() && shape[0] > 0 &&
             "Must specify positive pooling dimension.");
-        layers->push_back(
+        layers.emplace_back(
             new Pool2D(last, shape[0],
                 CUDNN_POOLING_AVERAGE_COUNT_EXCLUDE_PADDING,
                 cublasHandle, cudnnHandle) );
@@ -143,8 +142,7 @@ void Model::init_workspace()
     assert(this->has_loss && "All layers of model must have been added!");
 
     // Get the largest workspace needed by any layer
-    std::vector<Layer *>::iterator it;
-    for (it = layers->begin(); it != layers->end(); ++it)
+    for (auto it = layers.begin(); it != layers.end(); ++it)
         workspace_size = std::max(workspace_size, (*it)->get_workspace_size());
 
     // If any need a nonzero-sized workspace, initialize one appropriately
@@ -152,7 +150,7 @@ void Model::init_workspace()
     if (workspace_size > 0)
     {
         CUDA_CALL( cudaMalloc(&workspace, workspace_size) );
-        for (it = layers->begin(); it != layers->end(); ++it)
+        for (auto it = layers.begin(); it != layers.end(); ++it)
             (*it)->set_workspace(workspace, workspace_size);
     }
 }
@@ -176,8 +174,8 @@ void Model::init_workspace()
 void Model::train(const float *train_X, float *train_Y, float lr, int n_examples,
     int n_epochs)
 {
-    int in_size = get_output_batch_size(layers->front());
-    int out_size = get_output_batch_size(layers->back());
+    int in_size = get_output_batch_size(layers.front());
+    int out_size = get_output_batch_size(layers.back());
     int n_batches = n_examples / batch_size;
 
     for (int i = 0; i < n_epochs; ++i)
@@ -197,8 +195,8 @@ void Model::train(const float *train_X, float *train_Y, float lr, int n_examples
             train_on_batch(curr_batch_X, curr_batch_Y, lr);
 
             // Update training statistics for this minibatch
-            acc += this->layers->back()->get_accuracy();
-            loss += this->layers->back()->get_loss();
+            acc += this->layers.back()->get_accuracy();
+            loss += this->layers.back()->get_loss();
         }
 
         std::cout << "Loss: " << loss / n_batches;
@@ -221,8 +219,8 @@ void Model::train(const float *train_X, float *train_Y, float lr, int n_examples
 float *Model::predict(const float *pred_X, int n_examples)
 {
     // variables in which to get input and output shape
-    int in_size = get_output_batch_size(layers->front());
-    int out_size = get_output_batch_size(layers->back());
+    int in_size = get_output_batch_size(layers.front());
+    int out_size = get_output_batch_size(layers.back());
 
     /* Allocate array for predictions */
     float *pred_Y = new float[out_size * n_examples / batch_size];
@@ -254,8 +252,8 @@ float *Model::predict(const float *pred_X, int n_examples)
  */
 result *Model::evaluate(const float *eval_X, float *eval_Y, int n_examples)
 {
-    int in_size = get_output_batch_size(layers->front());
-    int out_size = get_output_batch_size(layers->back());
+    int in_size = get_output_batch_size(layers.front());
+    int out_size = get_output_batch_size(layers.back());
     int n_batches = n_examples / batch_size;
 
     // Allocate array for predictions
@@ -309,13 +307,11 @@ void Model::train_on_batch(const float *batch_X, float *batch_Y, float lr)
     copy_output_batch(batch_Y);
 
     // Do a forward pass through every layer
-    std::vector<Layer *>::iterator it;
-    for (it = this->layers->begin(); it != this->layers->end(); ++it)
+    for (auto it = layers.begin(); it != layers.end(); ++it)
         (*it)->forward_pass();
 
     // Do a backward pass through every layer
-    std::vector<Layer *>::reverse_iterator rit;
-    for (rit = this->layers->rbegin(); rit != this->layers->rend(); ++rit)
+    for (auto rit = layers.rbegin(); rit != layers.rend(); ++rit)
         (*rit)->backward_pass(lr);
 }
 
@@ -335,12 +331,11 @@ float *Model::predict_on_batch(const float *batch_X) {
     copy_input_batch(batch_X);
 
     // Do a forward pass through every layer
-    std::vector<Layer*>::iterator it;
-    for (it = this->layers->begin(); it != this->layers->end(); ++it)
+    for (auto it = layers.begin(); it != layers.end(); ++it)
         (*it)->forward_pass();
 
     // The predictions are the output of the last layer
-    return this->layers->back()->get_output_fwd();
+    return this->layers.back()->get_output_fwd();
 }
 
 
@@ -367,8 +362,8 @@ result *Model::evaluate_on_batch(const float *batch_X, float *batch_Y) {
     // Copy the output batch to the loss layer so we can evaluate our
     // predictions (since we've already done a forward pass)
     copy_output_batch(batch_Y);
-    ret->acc = this->layers->back()->get_accuracy();
-    ret->loss = this->layers->back()->get_loss();
+    ret->acc = layers.back()->get_accuracy();
+    ret->loss = layers.back()->get_loss();
     return ret;
 }
 
@@ -382,7 +377,7 @@ result *Model::evaluate_on_batch(const float *batch_X, float *batch_Y) {
  */
 void Model::copy_input_batch(const float *batch_X)
 {
-    Layer *input = layers->front();
+    std::shared_ptr<Layer> input = layers.front();
     int in_size = get_output_batch_size(input);
     CUDA_CALL( cudaMemcpyAsync(input->get_output_fwd(), batch_X,
         in_size * sizeof(float), cudaMemcpyHostToDevice) );
@@ -398,7 +393,7 @@ void Model::copy_input_batch(const float *batch_X)
  */
 void Model::copy_output_batch(const float *batch_Y)
 {
-    Layer *loss = layers->back();
+    auto loss = layers.back();
     int out_size = get_output_batch_size(loss);
     CUDA_CALL( cudaMemcpyAsync(loss->get_input_bwd(), batch_Y,
         out_size * sizeof(float), cudaMemcpyHostToDevice) );
@@ -411,7 +406,7 @@ void Model::copy_output_batch(const float *batch_Y)
  *
  * @return The size (in number of floats) of the output of {@code layer}
  */
-int Model::get_output_batch_size(Layer *layer) const
+int Model::get_output_batch_size(std::shared_ptr<Layer> layer) const
 {
     // variables in which to get output shape
     cudnnDataType_t dtype;

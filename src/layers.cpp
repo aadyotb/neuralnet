@@ -11,6 +11,7 @@
 #include <string>
 #include <sstream>
 #include <random>
+#include <memory>
 
 #include <cuda_runtime.h>
 #include <cublas_v2.h>
@@ -30,13 +31,12 @@
  * If there is a previous layer, initialize this layer's input as the previous
  * layer's' output (as well as the tensor descriptor).
  */
-Layer::Layer(Layer *prev, cublasHandle_t cublasHandle,
-    cudnnHandle_t cudnnHandle)
+Layer::Layer(std::shared_ptr<Layer> _prev, cublasHandle_t _cublasHandle,
+    cudnnHandle_t _cudnnHandle) :
+    prev(_prev),
+    cublasHandle(_cublasHandle),
+    cudnnHandle(_cudnnHandle)
 {
-    this->prev = prev;
-    this->cublasHandle = cublasHandle;
-    this->cudnnHandle = cudnnHandle;
-
     CUDNN_CALL( cudnnCreateTensorDescriptor(&in_shape) );
     if (prev)
     {
@@ -105,7 +105,7 @@ cudnnTensorDescriptor_t Layer::get_out_shape() const
 }
 
 /** Returns the previous layer */
-Layer *Layer::get_prev() const
+std::shared_ptr<Layer> Layer::get_prev() const
 {
     return this->prev;
 }
@@ -249,7 +249,7 @@ void Input::backward_pass(float learning_rate) {}
  * Flattens the input shape, sets the output shape based on the specified
  * output dimension, and allocates and initializes buffers appropriately.
  */
-Dense::Dense(Layer *prev, int out_dim,
+Dense::Dense(std::shared_ptr<Layer> prev, int out_dim,
     cublasHandle_t cublasHandle, cudnnHandle_t cudnnHandle)
 : Layer(prev, cublasHandle, cudnnHandle)
 {
@@ -368,7 +368,7 @@ void Dense::backward_pass(float learning_rate)
  * Initialize output shape to be the same as input shape, and initialize an
  * activation descriptor as appropriate.
  */
-Activation::Activation(Layer *prev, cudnnActivationMode_t activationMode,
+Activation::Activation(std::shared_ptr<Layer> prev, cudnnActivationMode_t activationMode,
     double coef, cublasHandle_t cublasHandle, cudnnHandle_t cudnnHandle)
 : Layer(prev, cublasHandle, cudnnHandle)
 {
@@ -433,7 +433,7 @@ void Activation::backward_pass(float learning_rate)
  * kernel is (kernel_size x kernel_size), the stride of the convolution is
  * (stride x stride).
  */
-Conv2D::Conv2D(Layer *prev, int n_kernels, int kernel_size, int stride,
+Conv2D::Conv2D(std::shared_ptr<Layer> prev, int n_kernels, int kernel_size, int stride,
     cublasHandle_t cublasHandle, cudnnHandle_t cudnnHandle)
 : Layer(prev, cublasHandle, cudnnHandle)
 {
@@ -573,7 +573,7 @@ void Conv2D::backward_pass(float learning_rate)
  * (stride x stride) stride to do mode-type pooling. Also computes output shape
  * of this operation.
  */
-Pool2D::Pool2D(Layer* prev, int stride, cudnnPoolingMode_t mode,
+Pool2D::Pool2D(std::shared_ptr<Layer> prev, int stride, cudnnPoolingMode_t mode,
     cublasHandle_t cublasHandle, cudnnHandle_t cudnnHandle)
 : Layer(prev, cublasHandle, cudnnHandle)
 {
@@ -628,15 +628,13 @@ void Pool2D::backward_pass(float learning_rate)
 /******************************************************************************/
 
 /** Inherits from a {\link Layer}. */
-Loss::Loss(Layer *prev, cublasHandle_t cublasHandle, cudnnHandle_t cudnnHandle)
+Loss::Loss(std::shared_ptr<Layer> prev, cublasHandle_t cublasHandle, cudnnHandle_t cudnnHandle)
 : Layer(prev, cublasHandle, cudnnHandle) {}
-
-Loss::~Loss() = default;
 
 /******************************************************************************/
 /*                SOFTMAX + CROSS-ENTROPY LOSS IMPLEMENTATION                 */
 /******************************************************************************/
-SoftmaxCrossEntropy::SoftmaxCrossEntropy(Layer *prev,
+SoftmaxCrossEntropy::SoftmaxCrossEntropy(std::shared_ptr<Layer> prev,
     cublasHandle_t cublasHandle, cudnnHandle_t cudnnHandle)
 : Loss(prev, cublasHandle, cudnnHandle)
 {

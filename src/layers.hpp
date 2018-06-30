@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include <memory>
 #include <cudnn.h>
 #include <cublas_v2.h>
 
@@ -17,9 +18,9 @@
 class Layer
 {
 public:
-    Layer(Layer *prev, cublasHandle_t cublasHandle, cudnnHandle_t cudnnHandle);
+    Layer(std::shared_ptr<Layer> prev, cublasHandle_t cublasHandle, cudnnHandle_t cudnnHandle);
     virtual ~Layer();
-    Layer *get_prev() const;
+    std::shared_ptr<Layer> get_prev() const;
 
     /**
      * Computes this layer's forward pass on an input minibatch of data, and
@@ -55,7 +56,7 @@ public:
 
 protected:
     /** Previous layer. */
-    Layer *prev;
+    std::shared_ptr<Layer> prev;
 
     /**
      * Tensor descriptor for the input minibatch {\link Layer::in_batch} and
@@ -158,7 +159,7 @@ public:
 class Dense : public Layer
 {
 public:
-    Dense(Layer *prev, int out_dim,
+    Dense(std::shared_ptr<Layer> prev, int out_dim,
         cublasHandle_t cublasHandle, cudnnHandle_t cudnnHandle);
     ~Dense();
     void forward_pass() override;
@@ -185,7 +186,7 @@ private:
 class Activation : public Layer
 {
 public:
-    Activation(Layer *prev, cudnnActivationMode_t activationMode, double coef,
+    Activation(std::shared_ptr<Layer> prev, cudnnActivationMode_t activationMode, double coef,
         cublasHandle_t cublasHandle, cudnnHandle_t cudnnHandle);
     ~Activation();
     void forward_pass() override;
@@ -203,7 +204,7 @@ private:
 class Conv2D : public Layer
 {
 public:
-    Conv2D(Layer *prev, int n_kernels, int kernel_size, int stride,
+    Conv2D(std::shared_ptr<Layer> prev, int n_kernels, int kernel_size, int stride,
         cublasHandle_t cublasHandle, cudnnHandle_t cudnnHandle);
     ~Conv2D();
     size_t get_workspace_size() const override;
@@ -237,7 +238,7 @@ private:
 class Pool2D : public Layer
 {
 public:
-    Pool2D(Layer *prev, int stride, cudnnPoolingMode_t mode,
+    Pool2D(std::shared_ptr<Layer> prev, int stride, cudnnPoolingMode_t mode,
         cublasHandle_t cublasHandle, cudnnHandle_t cudnnHandle);
     ~Pool2D();
     void forward_pass() override;
@@ -260,8 +261,7 @@ private:
  */
 class Loss : public Layer {
 public:
-    Loss(Layer *prev, cublasHandle_t cublasHandle, cudnnHandle_t cudnnHandle);
-    ~Loss();
+    Loss(std::shared_ptr<Layer> prev, cublasHandle_t cublasHandle, cudnnHandle_t cudnnHandle);
 
 protected:
     /** Loss incurred on the given data minibatch. */
@@ -277,7 +277,7 @@ protected:
  */
 class SoftmaxCrossEntropy : public Loss {
 public:
-    SoftmaxCrossEntropy(Layer *prev, cublasHandle_t cublasHandle, cudnnHandle_t cudnnHandle);
+    SoftmaxCrossEntropy(std::shared_ptr<Layer> prev, cublasHandle_t cublasHandle, cudnnHandle_t cudnnHandle);
     ~SoftmaxCrossEntropy();
     void forward_pass() override;
     void backward_pass(float lr) override;

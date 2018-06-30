@@ -8,6 +8,7 @@
 #pragma once
 
 #include <vector>
+#include <memory>
 #include <cublas_v2.h>
 #include <cudnn.h>
 #include "layers.hpp"
@@ -45,7 +46,7 @@ private:
     void copy_input_batch(const float *batch_X);
     void copy_output_batch(const float *batch_Y);
 
-    int get_output_batch_size(Layer *layer) const;
+    int get_output_batch_size(std::shared_ptr<Layer> layer) const;
 
     /** Whether a loss layer has been added */
     bool has_loss;
@@ -57,7 +58,7 @@ private:
     int input_size = 0;
 
     /** A vector containing the layers this neural net is comprised of */
-    std::vector<Layer *> *layers;
+    std::vector<std::shared_ptr<Layer>> layers;
 
     /** cuBLAS library context */
     cublasHandle_t cublasHandle;

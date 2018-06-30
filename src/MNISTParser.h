@@ -219,7 +219,12 @@ public:
             }
 
             uint8_t cat;
-            fread(&cat, sizeof(uint8_t), 1, flabel);
+            if (fread(&cat, sizeof(uint8_t), 1, flabel) != 1)
+            {
+                printf("Failed to read label for image %d in %s", counter,
+                        imageFile);
+                return 1;
+            }
             // assert(cat >= 0 && cat < c_categoryCount);
             m_categoryBuffer[counter] = cat;
 

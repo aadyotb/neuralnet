@@ -27,7 +27,7 @@ else
 	NVCC_FLAGS := -m64
 endif
 
-NVCC_FLAGS += -g -dc -Wno-deprecated-gpu-targets --std=c++11 \
+NVCC_FLAGS += -dc -Wno-deprecated-gpu-targets --std=c++11 \
 	      --expt-relaxed-constexpr
 NVCC_INCLUDE =
 NVCC_CUDA_LIBS =
@@ -47,7 +47,7 @@ CUDA_LINK_FLAGS = -dlink -Wno-deprecated-gpu-targets
 
 # C++ Compiler and Flags
 GPP = g++
-FLAGS = -g -Wall -D_REENTRANT -std=c++11 -pthread
+FLAGS = -O3 -Wall -D_REENTRANT -std=c++11 -pthread
 INCLUDE = -I$(CUDA_INC_PATH)
 CUDA_LIBS = -L$(CUDA_LIB_PATH) -lcudart -lcufft -lcublas -lcudnn -lcurand
 
